@@ -196,7 +196,9 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 	useEffect(() => {
 		const el = screenshotRef.current
 		if (!el) return
+		let mounted = true
 		const update = () => {
+			if (!mounted) return
 			const r = el.getBoundingClientRect()
 			setSW(r.width)
 			setSH(r.height)
@@ -206,6 +208,7 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 			typeof window !== "undefined" && "ResizeObserver" in window ? new ResizeObserver(() => update()) : null
 		if (ro) ro.observe(el)
 		return () => {
+			mounted = false
 			if (ro) ro.disconnect()
 		}
 	}, [])

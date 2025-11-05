@@ -380,17 +380,29 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Broadcast to browser panel
 			this.broadcastBrowserSessionUpdate()
 
-			// When a browser session becomes active, automatically open/reveal the Browser Session tab
+			// When a browser session becomes active, automatically open/reveal the Browser Session tab.
+			// Defer to the microtask queue and re-check active state to avoid race conditions
+			// where the session could be closed before the panel opens.
 			if (isActive) {
 				try {
-					// Lazy-load to avoid circular imports at module load time
-					const { BrowserSessionPanelManager } = require("../webview/BrowserSessionPanelManager")
 					const providerRef = this.providerRef.deref()
-					if (providerRef) {
-						BrowserSessionPanelManager.getInstance(providerRef)
-							.show()
-							.catch(() => {})
-					}
+					if (!providerRef) return
+
+					Promise.resolve().then(async () => {
+						try {
+							// Ensure the session is still active before opening the panel
+							if (!(this.browserSession?.isSessionActive() ?? false)) return
+
+							// Lazy-load to avoid circular imports at module load time
+							const { BrowserSessionPanelManager } = require("../webview/BrowserSessionPanelManager")
+							const mgr = BrowserSessionPanelManager.getInstance(providerRef)
+							// New session: allow auto-open again
+							mgr.resetManualCloseFlag()
+							await mgr.show()
+						} catch {
+							// swallow
+						}
+					})
 				} catch (err) {
 					console.error("[Task] Failed to auto-open Browser Session panel:", err)
 				}

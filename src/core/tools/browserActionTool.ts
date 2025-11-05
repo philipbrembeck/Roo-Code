@@ -115,11 +115,15 @@ export async function browserActionTool(
 				await cline.browserSession.launchBrowser()
 
 				// Create browser_action say message AFTER launching so status appears first
+				// Include size to keep message shape consistent with other actions
+				const vs = cline.browserSession.getViewportSize()
+				const launchSize = `${vs.width ?? 900}x${vs.height ?? 600}`
 				await cline.say(
 					"browser_action",
 					JSON.stringify({
 						action: "launch" as BrowserAction,
 						text: url,
+						size: launchSize,
 					} satisfies ClineSayBrowserAction),
 					undefined,
 					false,
@@ -187,7 +191,7 @@ export async function browserActionTool(
 					"browser_action",
 					JSON.stringify({
 						action: action as BrowserAction,
-						coordinate,
+						coordinate: processedCoordinate,
 						text,
 						size,
 					} satisfies ClineSayBrowserAction),
