@@ -183,10 +183,11 @@ const BrowserActionRow = memo(({ message, nextMessage, actionIndex, totalActions
 		const isLaunchAction = browserAction?.action === "launch"
 
 		if (isLaunchAction) {
-			// Launch action: navigate to step 0 (the launch)
+			// Launch action: show panel but do NOT force navigation.
+			// This preserves the user's manually selected step; BrowserSessionRow will only auto-advance
+			// when the user is already on the most recent step.
 			vscode.postMessage({
 				type: "showBrowserSessionPanelAtStep",
-				stepIndex: 0,
 				isLaunchAction: true,
 			})
 			hasHandledAutoOpenRef.current = true
@@ -217,7 +218,7 @@ const BrowserActionRow = memo(({ message, nextMessage, actionIndex, totalActions
 				style={headerStyle}
 				className="cursor-pointer"
 				onClick={() => {
-					const idx = typeof actionIndex === "number" ? Math.max(0, actionIndex - 1) : 0
+					const idx = typeof actionIndex === "number" ? actionIndex : 0
 					vscode.postMessage({ type: "showBrowserSessionPanelAtStep", stepIndex: idx, forceShow: true })
 				}}>
 				<span
