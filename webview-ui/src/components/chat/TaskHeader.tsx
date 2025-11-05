@@ -1,9 +1,9 @@
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { useCloudUpsell } from "@src/hooks/useCloudUpsell"
 import { CloudUpsellDialog } from "@src/components/cloud/CloudUpsellDialog"
 import DismissibleUpsell from "@src/components/common/DismissibleUpsell"
-import { FoldVertical, ChevronUp, ChevronDown } from "lucide-react"
+import { FoldVertical, ChevronUp, ChevronDown, Globe } from "lucide-react"
 import prettyBytes from "pretty-bytes"
 
 import type { ClineMessage } from "@roo-code/types"
@@ -13,9 +13,10 @@ import { findLastIndex } from "@roo/array"
 
 import { formatLargeNumber } from "@src/utils/format"
 import { cn } from "@src/lib/utils"
-import { StandardTooltip } from "@src/components/ui"
+import { StandardTooltip, Button } from "@src/components/ui"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
+import { vscode } from "@src/utils/vscode"
 
 import Thumbnails from "../common/Thumbnails"
 
@@ -50,7 +51,7 @@ const TaskHeader = ({
 	todos,
 }: TaskHeaderProps) => {
 	const { t } = useTranslation()
-	const { apiConfiguration, currentTaskItem, clineMessages } = useExtensionState()
+	const { apiConfiguration, currentTaskItem, clineMessages, isBrowserSessionActive } = useExtensionState()
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
 	const [showLongRunningTaskMessage, setShowLongRunningTaskMessage] = useState(false)
@@ -85,6 +86,21 @@ const TaskHeader = ({
 	const textContainerRef = useRef<HTMLDivElement>(null)
 	const textRef = useRef<HTMLDivElement>(null)
 	const contextWindow = model?.contextWindow || 1
+
+	// Detect if this task had any browser session activity so we can show a grey globe when inactive
+	const browserSessionStartIndex = useMemo(() => {
+		const msgs = clineMessages || []
+		for (let i = 0; i < msgs.length; i++) {
+			const m = msgs[i] as any
+			if (m?.ask === "browser_action_launch") return i
+			if (m?.say === "browser_session_status" && typeof m.text === "string" && m.text.includes("opened")) {
+				return i
+			}
+		}
+		return -1
+	}, [clineMessages])
+
+	const showBrowserGlobe = browserSessionStartIndex !== -1 || !!isBrowserSessionActive
 
 	const condenseButton = (
 		<StandardTooltip content={t("chat:task.condenseContext")}>
@@ -324,6 +340,40 @@ const TaskHeader = ({
 							<TaskActions item={currentTaskItem} buttonsDisabled={buttonsDisabled} />
 						</div>
 					</>
+				)}
+				{/* Browser session status moved from bottom bar to header (bottom-right) */}
+				{showBrowserGlobe && (
+					<div
+						className="absolute bottom-2 right-3 flex items-center gap-1"
+						onClick={(e) => e.stopPropagation()}>
+						<StandardTooltip content={t("chat:browser.session")}>
+							<Button
+								variant="ghost"
+								size="sm"
+								aria-label={t("chat:browser.session")}
+								onClick={() => vscode.postMessage({ type: "openBrowserSessionPanel" } as any)}
+								className={cn(
+									"relative h-5 w-5 p-0",
+									"text-vscode-foreground opacity-85",
+									"hover:opacity-100 hover:bg-[rgba(255,255,255,0.03)]",
+									"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
+								)}>
+								<Globe
+									className="w-4 h-4"
+									style={{
+										color: isBrowserSessionActive
+											? "#4ade80"
+											: "var(--vscode-descriptionForeground)",
+									}}
+								/>
+							</Button>
+						</StandardTooltip>
+						{isBrowserSessionActive && (
+							<span className="text-sm font-medium" style={{ color: "var(--vscode-testing-iconPassed)" }}>
+								Active
+							</span>
+						)}
+					</div>
 				)}
 			</div>
 			<TodoListDisplay todos={todos ?? (task as any)?.tool?.todos ?? []} />
