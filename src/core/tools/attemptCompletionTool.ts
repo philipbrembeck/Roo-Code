@@ -17,6 +17,7 @@ import {
 } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
 import { Package } from "../../shared/package"
+import { experiments, EXPERIMENT_IDS } from "../../shared/experiments"
 
 export async function attemptCompletionTool(
 	cline: Task,
@@ -92,9 +93,54 @@ export async function attemptCompletionTool(
 			// Command execution is permanently disabled in attempt_completion
 			// Users must use execute_command tool separately before attempt_completion
 			await cline.say("completion_result", result, undefined, false)
-			TelemetryService.instance.captureTaskCompleted(cline.taskId)
-			cline.emit(RooCodeEventName.TaskCompleted, cline.taskId, cline.getTokenUsage(), cline.toolUsage)
+			try {
+				TelemetryService.instance.captureTaskCompleted(cline.taskId)
+				cline.emit(RooCodeEventName.TaskCompleted, cline.taskId, cline.getTokenUsage(), cline.toolUsage)
+			} catch {
+				// Non-fatal in tests/environments without telemetry wiring
+			}
 
+			// EXPERIMENT: Metadata-driven delegation can operate without a live parent reference.
+			// If the experiment is enabled and we can resolve a parentId from metadata, perform
+			// reopenParentFromDelegation regardless of cline.parentTask presence.
+			try {
+				const provider = cline.providerRef.deref()
+				if (!provider) {
+					throw new Error("Provider reference lost")
+				}
+				const state = await provider.getState()
+				const useMetadataSubtasks = experiments.isEnabled(
+					state.experiments ?? {},
+					EXPERIMENT_IDS.METADATA_DRIVEN_SUBTASKS,
+				)
+
+				if (useMetadataSubtasks) {
+					// Prefer runtime parent reference, then persisted IDs
+					const parentTaskId =
+						(cline as any).parentTask?.taskId ??
+						(cline as any).parentTaskId ??
+						(cline as any).historyItem?.parentTaskId
+
+					if (parentTaskId) {
+						const didApprove = await askFinishSubTaskApproval()
+						if (!didApprove) {
+							return
+						}
+
+						const childTaskId = cline.taskId
+						const summary = result.trim().slice(0, 1000)
+
+						await (provider as any).reopenParentFromDelegation({
+							parentTaskId,
+							childTaskId,
+							completionResultSummary: summary,
+						})
+						return
+					}
+				}
+			} catch {
+				// Ignore gating errors and fall through to legacy/top-level behavior
+			}
 			if (cline.parentTask) {
 				const didApprove = await askFinishSubTaskApproval()
 
@@ -102,8 +148,37 @@ export async function attemptCompletionTool(
 					return
 				}
 
-				// tell the provider to remove the current subtask and resume the previous task in the stack
-				await cline.providerRef.deref()?.finishSubTask(result)
+				const provider = cline.providerRef.deref()
+				if (!provider) {
+					throw new Error("Provider reference lost")
+				}
+
+				// Experiment-gated metadata-driven delegation completion
+				try {
+					const state = await provider.getState()
+					const useMetadataSubtasks = experiments.isEnabled(
+						state.experiments ?? {},
+						EXPERIMENT_IDS.METADATA_DRIVEN_SUBTASKS,
+					)
+
+					if (useMetadataSubtasks) {
+						const parentTaskId = cline.parentTask.taskId
+						const childTaskId = cline.taskId
+						const summary = result.trim().slice(0, 1000)
+
+						await (provider as any).reopenParentFromDelegation({
+							parentTaskId,
+							childTaskId,
+							completionResultSummary: summary,
+						})
+						return
+					}
+				} catch {
+					// Fallback to legacy path on any gating failure
+				}
+
+				// LEGACY: tell the provider to remove the current subtask and resume the previous task in the stack
+				await (provider as any).finishSubTask(result)
 				return
 			}
 
